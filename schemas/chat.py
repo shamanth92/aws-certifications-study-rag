@@ -13,6 +13,7 @@ class ChatMode(str, Enum):
 class ChatRequest(BaseModel):
     message: str
     mode: ChatMode = ChatMode.qa
+    conversation_id: str | None = None
 
 
 class ChatResponse(BaseModel):

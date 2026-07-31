@@ -4,6 +4,7 @@ from routers.basicRag.ingestion import router as ingestion_router
 from routers.basicRag.rag_chat import router as rag_chat_router
 from routers.langChainRag.langchain_ingestion import router as langchain_ingestion_router
 from routers.langChainRag.langchain_rag_chat import router as langchain_rag_chat_router
+from fastapi.middleware.cors import CORSMiddleware
 
 # This app implements the same RAG (Retrieval-Augmented Generation) pipeline twice,
 # side by side, for learning purposes:
@@ -16,6 +17,15 @@ from routers.langChainRag.langchain_rag_chat import router as langchain_rag_chat
 # uv run fastapi dev main.py
 
 app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # Adjust this in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Each router is self-contained: it owns its own prefix, tags, and error handling.
 # See the router files themselves for the actual endpoints.

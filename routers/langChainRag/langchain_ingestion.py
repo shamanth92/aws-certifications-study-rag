@@ -37,6 +37,22 @@ def ingest(docs_dir: str = "docs"):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# Returns the distinct filenames currently ingested, for the frontend to show
+# users what topics are covered. LangChain's loader stores the file path under
+# the "source" metadata key (not "document_name") -- Path(...).name strips it
+# down to just the filename.
+@router.get("/documents")
+def get_ingested_documents():
+    try:
+        collection = chroma_client.get_or_create_collection(COLLECTION_NAME)
+        result = collection.get(include=["metadatas"])
+        filenames = {Path(m["source"]).name for m in result["metadatas"]}
+        return {
+            "documents": sorted(filenames)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # Wipes and recreates the collection so you can re-ingest cleanly (e.g. after
 # fixing a chunking bug) without duplicate-ID errors from old records.

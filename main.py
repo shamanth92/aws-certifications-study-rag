@@ -21,10 +21,11 @@ app = FastAPI()
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Adjust this in production
+    allow_origins=["http://localhost:4200"],  # Adjust this in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Conversation-Id"],
 )
 
 # Each router is self-contained: it owns its own prefix, tags, and error handling.

@@ -1,14 +1,24 @@
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+import os
+from dotenv import load_dotenv
+from langchain_openai import OpenAIEmbeddings
+from langchain_anthropic import ChatAnthropic
 from langchain_chroma import Chroma
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from services.conversation_service import get_history, add_message
 
+load_dotenv()
+
 # Module-level (created once, reused across requests) since these don't hold
 # any state tied to a specific ChromaDB collection snapshot.
+# Embeddings stay on OpenAI -- Anthropic has no embeddings API, so retrieval
+# is unaffected by the switch to Claude for chat/generation below.
 embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-llm = ChatOpenAI(model="gpt-5-mini")
+
+# CLAUDE_API_KEY is passed explicitly since ChatAnthropic defaults to reading
+# ANTHROPIC_API_KEY from the environment, not CLAUDE_API_KEY.
+llm = ChatAnthropic(model="claude-sonnet-5", api_key=os.getenv("CLAUDE_API_KEY"))
 
 # Two prompt templates share the same retrieval step but produce very
 # different output -- this is the "one endpoint, swap the prompt by mode"
@@ -36,6 +46,21 @@ multiple choice questions on the topic the user asks about.
 If the topic refers to something ambiguous (e.g. "it", "its", "that", "this") and the topic is not \
 clear from the request itself, do not guess -- ask the user to clarify which topic they want \
 questions on instead of generating questions.
+
+Each question must test understanding of the underlying AWS AI/ML concept -- e.g. how a service \
+works, when to use it over an alternative, how it fits a given scenario, or what a term/feature \
+means. This should read exactly like a real AIF-C01 exam question.
+
+Never write a question about the source material itself -- do not ask which document, whitepaper, \
+guide, or exam guide mentions/lists/includes something, and do not make the document's title, \
+metadata, or structure the subject of the question or an answer option. The context is only a \
+source of facts to build real scenario questions from, not a topic to be quizzed on.
+
+Do not reference the source material anywhere inside the question text either -- never write \
+phrases like "according to the guide", "based on the provided context", "per the whitepaper", or \
+similar. State the scenario directly, exactly as a real exam question would, with no indication \
+that the question was derived from retrieved material. Save any reference to where the fact came \
+from for the Citation field only.
 
 Format each question as:
 Q: <question>
@@ -81,7 +106,13 @@ Standalone question:""")
 # collection that goes stale after a delete_collection() call (e.g. via the
 # DELETE /langchain/ingestion/ endpoint), causing "collection does not exist"
 # errors on the next query.
-async def generate_answer(question: str, mode: str = "qa", conversation_id: str | None = None) -> str:
+#
+# This is a generator (not a plain async function) so the router can stream
+# tokens to the client as they arrive, instead of waiting for the full answer.
+# The rewrite step still runs as a single non-streamed call first, since it's
+# short and the retriever needs the final standalone question before it can
+# even start searching -- only the final answer generation is streamed.
+async def stream_answer(question: str, mode: str = "qa", conversation_id: str | None = None):
     prompt = exam_prompt if mode == "exam" else qa_prompt  # mode value is the enum's string value
     vector_store = Chroma(
         collection_name="aws-rag-documents",
@@ -97,13 +128,18 @@ async def generate_answer(question: str, mode: str = "qa", conversation_id: str 
         | llm
         | StrOutputParser()
     )
-    answer = await chain.ainvoke(retrieval_question)
 
+    answer_chunks = []
+    async for chunk in chain.astream(retrieval_question):
+        answer_chunks.append(chunk)
+        yield chunk
+
+    # Only persist to history once the full answer has streamed successfully --
+    # a connection drop mid-stream shouldn't leave a user message with no reply.
     if conversation_id:
+        full_answer = "".join(answer_chunks)
         add_message(conversation_id, "user", question)
-        add_message(conversation_id, "assistant", answer)
-
-    return answer
+        add_message(conversation_id, "assistant", full_answer)
 
 async def rewrite_question(question: str, prior_messages: list[dict]) -> str:
     if not prior_messages:

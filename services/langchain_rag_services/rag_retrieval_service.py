@@ -18,7 +18,7 @@ embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 
 # CLAUDE_API_KEY is passed explicitly since ChatAnthropic defaults to reading
 # ANTHROPIC_API_KEY from the environment, not CLAUDE_API_KEY.
-llm = ChatAnthropic(model="claude-sonnet-5", api_key=os.getenv("CLAUDE_API_KEY"))
+llm = ChatAnthropic(model="claude-haiku-4-5-20251001", api_key=os.getenv("CLAUDE_API_KEY"))
 
 # Two prompt templates share the same retrieval step but produce very
 # different output -- this is the "one endpoint, swap the prompt by mode"

@@ -1,8 +1,12 @@
+import os
+from dotenv import load_dotenv
+import psycopg
 from langchain_pymupdf4llm import PyMuPDF4LLMLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
-from langchain_chroma import Chroma
+from langchain_postgres.vectorstores import PGVector
 
+load_dotenv()
 
 # LangChain equivalent of the basic pipeline's read -> chunk -> embed -> store
 # steps, collapsed into one function since LangChain's building blocks each
@@ -11,7 +15,7 @@ from langchain_chroma import Chroma
 #   RecursiveCharacterTextSplitter -> chunks text, splitting on paragraph/sentence
 #                                     boundaries where possible (unlike the basic
 #                                     pipeline's naive fixed-size slicing)
-#   OpenAIEmbeddings + Chroma   -> embeds and stores in one call (add_documents
+#   OpenAIEmbeddings + PGVectorStore -> embeds and stores in one call (add_documents
 #                                  embeds internally, unlike the basic pipeline
 #                                  where vectorization and storage are separate steps)
 def rag_ingestion_service(file_path: str):
@@ -23,7 +27,7 @@ def rag_ingestion_service(file_path: str):
         chunk_overlap=200
     )
     # Filter out empty chunks (e.g. image-only pages produce blank text) --
-    # ChromaDB rejects add_documents() calls containing an empty embedding.
+    # PGVector rejects add_documents() calls containing an empty embedding.
     chunks = [c for c in text_splitter.split_documents(documents) if c.page_content.strip()]
 
     # A file with no extractable text (e.g. all pages are scanned images)
@@ -37,17 +41,18 @@ def rag_ingestion_service(file_path: str):
         }
 
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+    database_url = os.getenv("DATABASE_URL")
+    conn = psycopg.connect(database_url)
 
-    # Uses a separate collection name ("aws-rag-documents") from the basic
-    # pipeline's "documents" collection, in the same chroma_db folder, so the
-    # two pipelines never overwrite each other's data.
-    vector_store = Chroma(
-        collection_name="aws-rag-documents",
-        embedding_function=embeddings,
-        persist_directory="./chroma_db"
+    # Uses PGVector with table name "aws_rag_documents" to keep this
+    # pipeline's vectors separate from the basic pipeline's "documents" table.
+    vector_store = PGVector.from_documents(
+        documents=chunks,
+        embedding=embeddings,
+        connection=conn,
+        table_name="aws_rag_documents",
+        use_jsonb=True
     )
-
-    vector_store.add_documents(chunks)
 
     return {
         "file": file_path,

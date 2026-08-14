@@ -1,14 +1,14 @@
+import os
 from fastapi import APIRouter, HTTPException
 from pathlib import Path
-import chromadb
+from dotenv import load_dotenv
+import psycopg
 from services.langchain_rag_services.rag_ingestion_service import rag_ingestion_service
 
-# Separate chromadb client here (distinct from services/rag_services/vector_store_service.py's
-# client) purely for the delete endpoint below -- LangChain's Chroma wrapper
-# doesn't expose collection deletion, so we talk to the underlying chromadb
-# client directly, targeting the same collection name the ingestion service uses.
-chroma_client = chromadb.PersistentClient(path="./chroma_db")
-COLLECTION_NAME = "aws-rag-documents"
+load_dotenv()
+
+TABLE_NAME = "aws_rag_documents"
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 router = APIRouter(prefix="/langchain/ingestion", tags=["langchain-ingestion"])
 
@@ -38,31 +38,36 @@ def ingest(docs_dir: str = "docs"):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Returns the distinct filenames currently ingested, for the frontend to show
-# users what topics are covered. LangChain's loader stores the file path under
-# the "source" metadata key (not "document_name") -- Path(...).name strips it
-# down to just the filename.
+# users what topics are covered. Metadata is stored as JSONB in the cmetadata column.
 @router.get("/documents")
 def get_ingested_documents():
     try:
-        collection = chroma_client.get_or_create_collection(COLLECTION_NAME)
-        result = collection.get(include=["metadatas"])
-        filenames = {Path(m["source"]).name for m in result["metadatas"]}
-        return {
-            "documents": sorted(filenames)
-        }
+        with psycopg.connect(DATABASE_URL) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    SELECT DISTINCT (cmetadata->>'source') as source
+                    FROM {TABLE_NAME}
+                    WHERE cmetadata->>'source' IS NOT NULL
+                """)
+                rows = cur.fetchall()
+                filenames = {Path(row[0]).name for row in rows}
+                return {
+                    "documents": sorted(filenames)
+                }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Wipes and recreates the collection so you can re-ingest cleanly (e.g. after
-# fixing a chunking bug) without duplicate-ID errors from old records.
-# delete_collection() raises if the collection doesn't exist yet (e.g. first
-# run before any ingestion) -- that's expected and safely ignored here.
+# Wipes the table so you can re-ingest cleanly (e.g. after fixing a chunking bug)
+# without duplicate-ID errors from old records. If the table doesn't exist, that's
+# fine -- we just return successfully.
 @router.delete("/")
 def delete_all():
     try:
-        chroma_client.delete_collection(COLLECTION_NAME)
-    except Exception:
-        pass
-    chroma_client.get_or_create_collection(COLLECTION_NAME)
-    return {"message": f"Collection '{COLLECTION_NAME}' cleared"}
+        with psycopg.connect(DATABASE_URL) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"DROP TABLE IF EXISTS {TABLE_NAME} CASCADE")
+                conn.commit()
+        return {"message": f"Table '{TABLE_NAME}' cleared"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

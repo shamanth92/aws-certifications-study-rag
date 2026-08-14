@@ -1,8 +1,9 @@
 import os
 from dotenv import load_dotenv
+import psycopg
 from langchain_openai import OpenAIEmbeddings
 from langchain_anthropic import ChatAnthropic
-from langchain_chroma import Chroma
+from langchain_postgres.vectorstores import PGVector
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
@@ -11,7 +12,7 @@ from services.conversation_service import get_history, add_message
 load_dotenv()
 
 # Module-level (created once, reused across requests) since these don't hold
-# any state tied to a specific ChromaDB collection snapshot.
+# any state tied to a specific database snapshot.
 # Embeddings stay on OpenAI -- Anthropic has no embeddings API, so retrieval
 # is unaffected by the switch to Claude for chat/generation below.
 embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
@@ -102,10 +103,7 @@ Standalone question:""")
 #   4. StrOutputParser() -> extracts the plain string answer from the LLM response
 #
 # vector_store/retriever/chain are (re)built on every call rather than cached
-# at module level -- caching them would hold a reference to the ChromaDB
-# collection that goes stale after a delete_collection() call (e.g. via the
-# DELETE /langchain/ingestion/ endpoint), causing "collection does not exist"
-# errors on the next query.
+# at module level to ensure fresh database connections and avoid stale state.
 #
 # This is a generator (not a plain async function) so the router can stream
 # tokens to the client as they arrive, instead of waiting for the full answer.
@@ -114,10 +112,12 @@ Standalone question:""")
 # even start searching -- only the final answer generation is streamed.
 async def stream_answer(question: str, mode: str = "qa", conversation_id: str | None = None):
     prompt = exam_prompt if mode == "exam" else qa_prompt  # mode value is the enum's string value
-    vector_store = Chroma(
-        collection_name="aws-rag-documents",
-        embedding_function=embeddings,
-        persist_directory="./chroma_db"
+    database_url = os.getenv("DATABASE_URL")
+    conn = psycopg.connect(database_url)
+    vector_store = PGVector.from_existing_index(
+        embedding=embeddings,
+        connection=conn,
+        table_name="aws_rag_documents"
     )
     retriever = vector_store.as_retriever(search_kwargs={"k": 5})
     prior_messages = get_history(conversation_id) if conversation_id else []

@@ -113,11 +113,11 @@ Standalone question:""")
 async def stream_answer(question: str, mode: str = "qa", conversation_id: str | None = None):
     prompt = exam_prompt if mode == "exam" else qa_prompt  # mode value is the enum's string value
     database_url = os.getenv("DATABASE_URL")
-    conn = psycopg.connect(database_url)
+    # conn = psycopg.connect(database_url)
     vector_store = PGVector.from_existing_index(
         embedding=embeddings,
-        connection=conn,
-        table_name="aws_rag_documents"
+        connection=database_url,
+        collection_name="aws_rag_documents"
     )
     retriever = vector_store.as_retriever(search_kwargs={"k": 5})
     prior_messages = get_history(conversation_id) if conversation_id else []

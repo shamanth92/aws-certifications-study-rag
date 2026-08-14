@@ -1,6 +1,5 @@
 import os
 from dotenv import load_dotenv
-import psycopg
 from langchain_pymupdf4llm import PyMuPDF4LLMLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
@@ -42,15 +41,16 @@ def rag_ingestion_service(file_path: str):
 
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
     database_url = os.getenv("DATABASE_URL")
-    conn = psycopg.connect(database_url)
+    if not database_url:
+        raise ValueError("DATABASE_URL environment variable is not set")
 
     # Uses PGVector with table name "aws_rag_documents" to keep this
     # pipeline's vectors separate from the basic pipeline's "documents" table.
     vector_store = PGVector.from_documents(
         documents=chunks,
         embedding=embeddings,
-        connection=conn,
-        table_name="aws_rag_documents",
+        connection=database_url,
+        collection_name="aws_rag_documents",
         use_jsonb=True
     )
 

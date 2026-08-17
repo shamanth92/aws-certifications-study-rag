@@ -1,6 +1,5 @@
 import os
 from dotenv import load_dotenv
-import psycopg
 from langchain_openai import OpenAIEmbeddings
 from langchain_anthropic import ChatAnthropic
 from langchain_postgres.vectorstores import PGVector
@@ -117,7 +116,8 @@ async def stream_answer(question: str, mode: str = "qa", conversation_id: str | 
     vector_store = PGVector.from_existing_index(
         embedding=embeddings,
         connection=database_url,
-        collection_name="aws_rag_documents"
+        collection_name="aws_rag_documents",
+        async_mode=True
     )
     retriever = vector_store.as_retriever(search_kwargs={"k": 5})
     prior_messages = get_history(conversation_id) if conversation_id else []

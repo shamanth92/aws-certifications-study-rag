@@ -4,6 +4,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 import psycopg
 from services.langchain_rag_services.rag_ingestion_service import rag_ingestion_service
+from langchain_openai import OpenAIEmbeddings
+from langchain_postgres.vectorstores import PGVector
 
 load_dotenv()
 
@@ -64,10 +66,25 @@ def get_ingested_documents():
 @router.delete("/")
 def delete_all():
     try:
-        with psycopg.connect(DATABASE_URL) as conn:
-            with conn.cursor() as cur:
-                cur.execute(f"DROP TABLE IF EXISTS {TABLE_NAME} CASCADE")
-                conn.commit()
-        return {"message": f"Table '{TABLE_NAME}' cleared"}
+        embeddings = OpenAIEmbeddings(
+            model="text-embedding-3-small"
+        )
+
+        vector_store = PGVector(
+            embeddings=embeddings,
+            connection=DATABASE_URL,
+            collection_name="aws_rag_documents",
+            use_jsonb=True
+        )
+
+        vector_store.delete_collection()
+
+        return {
+            "message": "Collection 'aws_rag_documents' cleared"
+        }
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )

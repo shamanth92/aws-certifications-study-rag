@@ -21,7 +21,10 @@ app = FastAPI()
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:4200"],  # Adjust this in production
+    allow_origins=[
+        "http://localhost:4200",  # Local development
+        "https://aws-certifications-rag-ui.vercel.app"  # Production frontend
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
